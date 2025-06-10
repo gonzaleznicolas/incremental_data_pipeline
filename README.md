@@ -12,11 +12,11 @@ This application fetches historical stock data for a configurable list of symbol
 
 ## General Prerequisites
 
-Before you begin, ensure you have the following installed and configured on your system:
+Before you begin, ensure you have the following tools installed and configured on your system. If not, please refer to their official documentation for installation instructions tailored to your operating system.
 
-*   **Git**: For cloning the repository.
-*   **Docker Engine**: The core Docker runtime. Ensure the Docker daemon is running.
-*   **Docker Compose**: For managing multi-container Docker applications (v2.x or later is recommended).
+*   **Git**: For cloning the repository. (See [official Git documentation](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git))
+*   **Docker Engine**: The core Docker runtime. Ensure the Docker daemon is running. (See [official Docker Engine installation guide](https://docs.docker.com/engine/install/))
+*   **Docker Compose**: For managing multi-container Docker applications (v2.x or later is recommended). (See [official Docker Compose installation guide](https://docs.docker.com/compose/install/))
 
 ## Initial Setup
 
