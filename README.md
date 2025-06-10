@@ -66,39 +66,66 @@ docker-compose up --build
 
 To stop the services, press `Ctrl+C` in the terminal where `docker-compose` is running, or run `docker-compose down` from another terminal in the project directory. To stop and remove volumes (including Postgres data), use `docker-compose down -v`.
 
-## Debugging in Cursor IDE (or VS Code) with Remote - Containers
+### 5. Inspecting the Database
 
-The "Remote - Containers" extension provides the best experience for developing and debugging.
+After the application has run (e.g., `docker-compose up --build`), you can inspect the PostgreSQL database directly to verify the data.
 
-1.  **Open the Project in Cursor via WSL.** (as previously described)
-2.  **Reopen in Container.** (as previously described)
-3.  **Debugging the Python Application:**
-    *   Open `app.py`.
-    *   Go to the "Run and Debug" view.
-    *   If you don't have a `launch.json` yet, click on "create a launch.json file," select "Python," and then "Python File." A `.vscode/launch.json` will be created. Ensure it includes the necessary environment variables (it should inherit from `docker-compose.yml` if using "Remote - Containers" correctly, but explicitly setting them for debug configuration is safer):
-        ```json
-        {
-            "version": "0.2.0",
-            "configurations": [
-                {
-                    "name": "Python: Current File",
-                    "type": "python",
-                    "request": "launch",
-                    "program": "${file}",
-                    "console": "integratedTerminal",
-                    "env": {
-                        "POSTGRES_USER": "myuser",
-                        "POSTGRES_PASSWORD": "mypassword",
-                        "POSTGRES_DB": "mydatabase",
-                        "POSTGRES_HOST": "postgres-db",
-                        "STOCK_SYMBOLS": "AAPL,MSFT,GOOGL" // Ensure this matches or is set for debugging
-                    }
-                }
-            ]
-        }
+1.  **Find your Postgres container name:**
+    Open a new terminal and list your running Docker containers:
+    ```bash
+    docker ps
+    ```
+    Look for the container running the `postgres:13-alpine` image. The name is usually in the last column (e.g., `postgres_db_container` or something similar if you used the `container_name` attribute in `docker-compose.yml`, or a Docker-generated name).
+
+2.  **Connect to the Postgres container using `psql`:**
+    Use the container name or ID from the previous step. The default username (`myuser`) and database name (`mydatabase`) are specified in `docker-compose.yml`.
+    ```bash
+    docker exec -it <your_postgres_container_name_or_id> psql -U myuser -d mydatabase
+    ```
+    For example, if your container name is `postgres_db_container`:
+    ```bash
+    docker exec -it postgres_db_container psql -U myuser -d mydatabase
+    ```
+
+3.  **Inspect the data using `psql` commands:**
+    Once connected, you can use standard SQL queries and `psql` commands:
+
+    *   List all tables:
+        ```sql
+        \dt
         ```
-    *   Set breakpoints in `app.py`.
-    *   Select the "Python: Current File" configuration and start debugging.
+    *   Describe the `stocks` table schema:
+        ```sql
+        \d stocks
+        ```
+    *   Describe the `stock_prices` table schema:
+        ```sql
+        \d stock_prices
+        ```
+    *   View all stock symbols:
+        ```sql
+        SELECT * FROM stocks;
+        ```
+    *   View all price entries (joining with stocks table for symbol):
+        ```sql
+        SELECT s.symbol, sp.date, sp.price, sp.ma_5day, sp.ma_30day
+        FROM stock_prices sp
+        JOIN stocks s ON sp.stock_id = s.id
+        ORDER BY s.symbol, sp.date DESC;
+        ```
+    *   View recent price data for a specific stock (e.g., AAPL):
+        ```sql
+        SELECT s.symbol, sp.date, sp.price, sp.ma_5day, sp.ma_30day
+        FROM stock_prices sp
+        JOIN stocks s ON sp.stock_id = s.id
+        WHERE s.symbol = 'AAPL'
+        ORDER BY sp.date DESC
+        LIMIT 10;
+        ```
+    *   To exit `psql`, type:
+        ```sql
+        \q
+        ```
 
 ## Environment Variables
 
