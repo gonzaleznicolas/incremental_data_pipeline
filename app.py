@@ -1,9 +1,30 @@
-import psycopg2
 import os
 import time
 import yfinance as yf
 import pandas as pd
 from datetime import datetime
+
+from sqlalchemy import create_engine, Column, Integer, String, Date, Numeric, ForeignKey, UniqueConstraint
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session
+
+# Define SQLAlchemy models
+Base = declarative_base()
+
+class Stock(Base):
+    __tablename__ = 'stocks'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    symbol = Column(String, unique=True, nullable=False)
+
+class StockPrice(Base):
+    __tablename__ = 'stock_prices'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    stock_id = Column(Integer, ForeignKey('stocks.id'), nullable=False)
+    date = Column(Date, nullable=False)
+    price = Column(Numeric(10, 2), nullable=False)
+    ma_5day = Column(Numeric(10, 2), nullable=True)
+    ma_30day = Column(Numeric(10, 2), nullable=True)
+    __table_args__ = (UniqueConstraint('stock_id', 'date', name='uq_stock_date'),)
 
 def get_env_variable(name):
     try:
@@ -15,62 +36,58 @@ def get_env_variable(name):
             return "AAPL,MSFT" # Default value if not set
         raise Exception(f"Environment variable {name} not set.")
 
-def get_or_create_stock_id(symbol, conn, cur):
+def get_or_create_stock_id(symbol: str, db: Session):
     """
-    Retrieves the ID of a stock from the 'stocks' table.
+    Retrieves the ID of a stock from the 'stocks' table using SQLAlchemy.
     If the stock doesn't exist, it inserts it and returns the new ID.
     """
     try:
-        cur.execute("SELECT id FROM stocks WHERE symbol = %s;", (symbol,))
-        stock_id_row = cur.fetchone()
-        if stock_id_row:
-            stock_id = stock_id_row[0]
-            print(f"Found stock ID {stock_id} for symbol {symbol}.")
-            return stock_id
+        stock = db.query(Stock).filter(Stock.symbol == symbol).first()
+        if stock:
+            print(f"Found stock ID {stock.id} for symbol {symbol}.")
+            return stock.id
         else:
-            cur.execute("INSERT INTO stocks (symbol) VALUES (%s) RETURNING id;", (symbol,))
-            new_stock_id = cur.fetchone()[0]
-            conn.commit()
-            print(f"Created new stock ID {new_stock_id} for symbol {symbol}.")
-            return new_stock_id
+            new_stock = Stock(symbol=symbol)
+            db.add(new_stock)
+            db.commit()
+            db.refresh(new_stock)
+            print(f"Created new stock ID {new_stock.id} for symbol {symbol}.")
+            return new_stock.id
     except Exception as e:
-        conn.rollback() # Rollback on error
-        print(f"Error in get_or_create_stock_id for {symbol}: {e}")
-        raise # Re-raise the exception to be caught by the caller
+        db.rollback()
+        print(f"Error in get_or_create_stock_id for {symbol} (SQLAlchemy): {e}")
+        raise
 
-def process_stock_symbol(symbol, conn, cur):
+def process_stock_symbol(symbol: str, db: Session):
     """
     Fetches historical stock data for a given symbol using yfinance,
-    calculates moving averages, and upserts the latest data point into the stock_prices table.
+    calculates moving averages, and upserts the latest data point into the stock_prices table using SQLAlchemy.
     """
     print(f"Processing data for stock symbol: {symbol}")
     try:
-        stock_id = get_or_create_stock_id(symbol, conn, cur)
+        stock_id = get_or_create_stock_id(symbol, db)
         if stock_id is None:
-            print(f"Could not get or create stock ID for {symbol}. Skipping.")
+            # This condition might be redundant if get_or_create_stock_id always raises on failure to get/create.
+            print(f"Could not get or create stock ID for {symbol}. Skipping processing.")
             return
 
         ticker = yf.Ticker(symbol)
-        # Fetch historical data - "3mo" to ensure enough data for 30-day MA for recent entries
-        # and to have a buffer if today is a non-trading day.
         hist_data = ticker.history(period="3mo")
 
         if hist_data.empty:
             print(f"Warning: No historical data found for {symbol}. Skipping.")
             return
 
-        # Calculate Moving Averages
         hist_data['MA5'] = hist_data['Close'].rolling(window=5).mean()
         hist_data['MA30'] = hist_data['Close'].rolling(window=30).mean()
 
-        if hist_data.empty: # Should be caught by earlier check, but as a safeguard
+        if hist_data.empty: # Should be caught by earlier check
             print(f"Warning: Historical data became empty after processing for {symbol}. Skipping.")
             return
 
-        # Get the latest valid data point (could be T-1, T-2 etc. if market is closed or yfinance data lags)
-        # Iterate backwards from the last row to find a row with price data
         latest_data = None
-        for i in range(len(hist_data) -1, -1, -1):
+        # Iterate backwards from the last row to find a row with price data
+        for i in range(len(hist_data) - 1, -1, -1):
             if pd.notna(hist_data.iloc[i]['Close']):
                 latest_data = hist_data.iloc[i]
                 break
@@ -79,8 +96,15 @@ def process_stock_symbol(symbol, conn, cur):
             print(f"Warning: Could not find a valid latest data point for {symbol}. Skipping.")
             return
 
-        data_date = latest_data.name.strftime('%Y-%m-%d') # Index is a Timestamp
-        # Ensure conversion to Python native float, handle NaNs by converting to None
+        # Convert pandas.Timestamp (latest_data.name) to Python datetime.date
+        # latest_data.name is the index, which is a Timestamp
+        data_date_ts = latest_data.name
+        if pd.isnull(data_date_ts):
+            print(f"Warning: Timestamp for date is null for {symbol}. Skipping.")
+            return
+        data_date = data_date_ts.to_pydatetime().date()
+
+
         price = float(latest_data['Close']) if pd.notna(latest_data['Close']) else None
         ma5 = float(latest_data['MA5']) if pd.notna(latest_data['MA5']) else None
         ma30 = float(latest_data['MA30']) if pd.notna(latest_data['MA30']) else None
@@ -89,113 +113,123 @@ def process_stock_symbol(symbol, conn, cur):
             print(f"Warning: Latest price is null for {symbol} on {data_date}. Skipping.")
             return
 
-        UPSERT_SQL = """
-        INSERT INTO stock_prices (stock_id, date, price, ma_5day, ma_30day)
-        VALUES (%s, %s, %s, %s, %s)
-        ON CONFLICT (stock_id, date) DO UPDATE SET
-          price = EXCLUDED.price,
-          ma_5day = EXCLUDED.ma_5day,
-          ma_30day = EXCLUDED.ma_30day;
-        """
-        cur.execute(UPSERT_SQL, (stock_id, data_date, price, ma5, ma30))
-        conn.commit()
+        existing_price_entry = db.query(StockPrice).filter_by(stock_id=stock_id, date=data_date).first()
 
-        # Safer print formatting
+        if existing_price_entry:
+            print(f"Updating data for {symbol} on {data_date}...")
+            existing_price_entry.price = price
+            existing_price_entry.ma_5day = ma5
+            existing_price_entry.ma_30day = ma30
+        else:
+            print(f"Inserting new data for {symbol} on {data_date}...")
+            new_price_entry = StockPrice(
+                stock_id=stock_id,
+                date=data_date,
+                price=price,
+                ma_5day=ma5,
+                ma_30day=ma30
+            )
+            db.add(new_price_entry)
+
+        db.commit()
+
         price_str = f"{price:.2f}" if isinstance(price, float) else "N/A"
         ma5_str = f"{ma5:.2f}" if isinstance(ma5, float) else "N/A"
         ma30_str = f"{ma30:.2f}" if isinstance(ma30, float) else "N/A"
         print(f"Successfully upserted data for {symbol} on {data_date}: Price={price_str}, MA5={ma5_str}, MA30={ma30_str}")
 
     except Exception as e:
-        conn.rollback() # Rollback on error
-        print(f"Error processing stock symbol {symbol}: {e}")
-        # Optionally re-raise or handle more gracefully depending on desired behavior for batch jobs
+        db.rollback()
+        print(f"Error processing stock symbol {symbol} (SQLAlchemy): {e}")
+        # raise # Optionally re-raise if main loop should stop
 
 def main():
-    conn = None
-    cur = None
+    db = None  # Initialize db to None for the finally block
     try:
         db_user = get_env_variable('POSTGRES_USER')
         db_password = get_env_variable('POSTGRES_PASSWORD')
         db_host = get_env_variable('POSTGRES_HOST')
         db_name = get_env_variable('POSTGRES_DB')
 
-        # Retry connection
+        DATABASE_URL = f"postgresql://{db_user}:{db_password}@{db_host}/{db_name}"
+
+        engine = None
+        # Retry connection for engine
         for i in range(5):
             try:
-                conn = psycopg2.connect(
-                    dbname=db_name,
-                    user=db_user,
-                    password=db_password,
-                    host=db_host
-                )
-                print("Successfully connected to PostgreSQL!")
+                engine = create_engine(DATABASE_URL)
+                # Try to establish a connection to check if DB is available
+                with engine.connect() as connection:
+                    print("Successfully connected to PostgreSQL via SQLAlchemy!")
                 break
-            except psycopg2.OperationalError as e:
-                print(f"Connection attempt {i+1} failed: {e}")
+            except Exception as e: # Catch generic sqlalchemy errors for connection
+                print(f"SQLAlchemy connection attempt {i+1} failed: {e}")
                 if i < 4:
                     time.sleep(5)
                 else:
-                    raise
+                    print("Failed to connect to the database via SQLAlchemy after several retries.")
+                    raise # Re-raise the last exception if all retries fail
 
-        if not conn:
-            print("Failed to connect to the database after several retries.")
-            return
+        if not engine:
+             print("Engine creation failed. Exiting.")
+             return
 
-        cur = conn.cursor()
+        # Create tables defined by models
+        Base.metadata.create_all(bind=engine)
+        print("Tables checked/created successfully via SQLAlchemy.")
 
-        # Create tables if they don't exist
-        cur.execute("""
-        CREATE TABLE IF NOT EXISTS stocks (
-            id SERIAL PRIMARY KEY,
-            symbol TEXT UNIQUE NOT NULL
-        );
-        """)
-        conn.commit()
-        print("Table 'stocks' checked/created successfully.")
+        SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+        db = SessionLocal()
 
-        cur.execute("""
-        CREATE TABLE IF NOT EXISTS stock_prices (
-            id SERIAL PRIMARY KEY,
-            stock_id INTEGER NOT NULL REFERENCES stocks(id) ON DELETE CASCADE,
-            date DATE NOT NULL,
-            price DECIMAL(10, 2) NOT NULL,
-            ma_5day DECIMAL(10, 2),
-            ma_30day DECIMAL(10, 2),
-            UNIQUE (stock_id, date)
-        );
-        """)
-        conn.commit()
-        print("Table 'stock_prices' checked/created successfully.")
+        # Remove old connection logic as it's no longer needed
+        # conn_old = psycopg2.connect(dbname=db_name, user=db_user, password=db_password, host=db_host)
+        # cur_old = conn_old.cursor()
 
         stock_symbols_str = get_env_variable('STOCK_SYMBOLS')
         if not stock_symbols_str:
-            # This case should ideally be caught by get_env_variable if no default is set and it raises an error.
-            # However, if get_env_variable returns an empty string for some reason:
             print("Error: STOCK_SYMBOLS environment variable is not set or effectively empty.")
+            # if conn_old: conn_old.close() # Removed
+            # if cur_old: cur_old.close() # Removed
+            if db: db.close()
             return
 
         stock_symbols_list = [symbol.strip().upper() for symbol in stock_symbols_str.split(',') if symbol.strip()]
 
         if not stock_symbols_list:
             print("No stock symbols provided in STOCK_SYMBOLS after stripping.")
+            # if conn_old: conn_old.close() # Removed
+            # if cur_old: cur_old.close() # Removed
+            if db: db.close()
             return
 
         print(f"Processing symbols: {stock_symbols_list}")
 
-        for symbol in stock_symbols_list:
-            process_stock_symbol(symbol, conn, cur)
+        for symbol_item in stock_symbols_list:
+            process_stock_symbol(symbol_item, db) # Updated call
 
         print("Finished processing all stock symbols.")
+        # if conn_old: # Removed
+            # conn_old.commit() # Removed
 
     except Exception as e:
         print(f"An error occurred in main: {e}")
+        if db: # db might not be initialized if engine creation fails
+            try:
+                db.rollback()
+                print("SQLAlchemy session rolled back due to error in main.")
+            except Exception as rb_exc:
+                print(f"Error during SQLAlchemy session rollback in main: {rb_exc}")
+        # Old conn_old rollback logic removed
+
     finally:
-        if cur:
-            cur.close()
-        if conn:
-            conn.close()
-            print("PostgreSQL connection closed.")
+        # if 'cur_old' in locals() and cur_old: # Removed
+        #     cur_old.close() # Removed
+        # if 'conn_old' in locals() and conn_old: # Removed
+        #     conn_old.close() # Removed
+        #     print("Old PostgreSQL (psycopg2) connection closed.") # Removed
+        if db:
+            db.close()
+            print("SQLAlchemy session closed.")
 
 if __name__ == "__main__":
     main()
