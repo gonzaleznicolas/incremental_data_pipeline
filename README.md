@@ -1,40 +1,3 @@
-## Running the Application with Jules (or in a Linux VM)
-
-If you are running this project in a Linux-based environment (like Jules, the AI assistant, or any standard Linux VM), the setup is straightforward using Docker and Docker Compose. The WSL-specific instructions can be ignored.
-
-### Prerequisites for Linux VM
-
-*   **Docker Engine**: Ensure Docker is installed and the Docker daemon is running. You might need to add your user to the 'docker' group to run Docker commands without `sudo` (e.g., `sudo usermod -aG docker $USER` and then log out/in).
-*   **Docker Compose**: Ensure Docker Compose (v2.x or later is recommended) is installed. Installation instructions can be found on the official Docker documentation.
-
-### Configuration
-
-1.  **Clone the Repository**: If you haven't already, clone the project.
-    ```bash
-    # git clone <repository-url>
-    # cd <repository-name>
-    ```
-
-2.  **Configure Stock Symbols**: The application processes stock symbols defined in the `STOCK_SYMBOLS` environment variable within the `docker-compose.yml` file. You can modify this list as needed. Refer to the "Configure Stock Symbols" section under the WSL instructions for details on which line to edit in `docker-compose.yml`.
-
-### Running the Application
-
-1.  **Navigate to Project Root**: Open your terminal and go to the root directory of the project.
-
-2.  **Build and Run with Docker Compose**:
-    Use the following command to build the Docker images (if they haven't been built or if `Dockerfile`/`requirements.txt` has changed) and start the services:
-    ```bash
-    docker-compose up --build
-    ```
-    If you encounter permission issues, you might need to use `sudo` with your Docker commands (e.g., `sudo docker-compose up --build`). However, configuring user permissions for Docker is the recommended long-term solution.
-
-    This command will start the Python application and the PostgreSQL database. The application will fetch data for the configured symbols, calculate moving averages, and store them.
-
-### Inspecting the Database
-
-After the application has run, you can inspect the PostgreSQL database directly to verify the data. The instructions for this are identical to those provided in the main "Inspecting the Database" section above. You will use `docker ps` to find your Postgres container and `docker exec` to connect with `psql`.
-
----
 # Python Stock Data Processor with Docker and PostgreSQL
 
 This application fetches historical stock data for a configurable list of symbols using the `yfinance` library, calculates 5-day and 30-day moving averages, and stores these details in a PostgreSQL database. The entire setup runs in Docker containers managed by Docker Compose.
@@ -47,31 +10,27 @@ This application fetches historical stock data for a configurable list of symbol
 *   PostgreSQL for data storage
 *   Docker & Docker Compose
 
-## Prerequisites
+## General Prerequisites
 
-*   Docker Desktop installed on your Windows machine.
-*   WSL (Windows Subsystem for Linux) enabled and a Linux distribution installed.
-*   Cursor IDE (or VS Code) installed.
-*   "Remote - Containers" extension (ms-vscode-remote.remote-containers) installed in Cursor IDE/VS Code.
+Before you begin, ensure you have the following installed and configured on your system:
 
-## Setup and Running the Application
+*   **Git**: For cloning the repository.
+*   **Docker Engine**: The core Docker runtime. Ensure the Docker daemon is running.
+*   **Docker Compose**: For managing multi-container Docker applications (v2.x or later is recommended).
 
-### 1. Configure Docker Desktop for WSL
+## Initial Setup
 
-*   Ensure Docker Desktop is running.
-*   Open Docker Desktop settings.
-*   Navigate to **Resources > WSL Integration**.
-*   Enable integration with your preferred WSL distribution.
-*   Apply & Restart.
+Follow these steps to get the application code and configure it:
 
-### 2. Clone the Repository (If you haven't already)
+### 1. Clone the Repository
 
+If you haven't already, clone the project to your local machine:
 ```bash
 # git clone <repository-url>
 # cd <repository-name>
 ```
 
-### 3. Configure Stock Symbols
+### 2. Configure Stock Symbols
 
 The application processes stock symbols defined in the `STOCK_SYMBOLS` environment variable within the `docker-compose.yml` file. You can modify this list as needed:
 
@@ -87,86 +46,92 @@ services:
 ```
 Update the `STOCK_SYMBOLS` line with your desired comma-separated stock symbols.
 
-### 4. Run with Docker Compose
+## Running the Application
 
-Open your WSL terminal and navigate to the root directory of this project. Run the following command to build the images (if they don't exist or if `Dockerfile`/`requirements.txt` changed) and start the services:
+Once the initial setup is complete, you can build and run the application using Docker Compose. The primary command is:
 
 ```bash
 docker-compose up --build
 ```
 
-*   This command starts the Python application and the PostgreSQL database.
-*   The Python app will fetch data for the configured symbols, calculate moving averages, and store them in the database.
-*   You will see logs from both services.
+This command starts the Python application and the PostgreSQL database. The Python app will fetch data for the configured symbols, calculate moving averages, and store them in the database. You will see logs from both services.
 
-**Note:** Depending on your Docker installation and user permissions, you might need to prepend `sudo` to Docker Compose commands (e.g., `sudo docker-compose up --build`).
+Below are environment-specific considerations:
 
-To stop the services, press `Ctrl+C` in the terminal where `docker-compose` is running, or run `docker-compose down` from another terminal in the project directory. To stop and remove volumes (including Postgres data), use `docker-compose down -v`.
+### For Linux VM / Generic Docker Environment (e.g., Jules)
 
-### 5. Inspecting the Database
+*   **User Permissions**: To run Docker commands without `sudo`, ensure your user is part of the `docker` group (e.g., run `sudo usermod -aG docker $USER` and then log out and log back in). If you prefer not to do this, prepend `sudo` to your `docker-compose` commands.
+*   **Command**: Navigate to the project's root directory in your terminal and execute:
+    ```bash
+    docker-compose up --build
+    ```
 
-After the application has run (e.g., `docker-compose up --build`), you can inspect the PostgreSQL database directly to verify the data.
+### For Windows Subsystem for Linux (WSL) Users
+
+Ensure Docker Desktop is configured to work with your WSL distribution:
+
+*   **WSL Docker Desktop Configuration**:
+    *   Ensure Docker Desktop for Windows is running.
+    *   Open Docker Desktop settings.
+    *   Navigate to **Resources > WSL Integration**.
+    *   Enable integration with your preferred WSL distribution.
+    *   Apply & Restart.
+*   **VS Code Integration (Optional but Recommended for WSL development)**:
+    *   Ensure Cursor IDE (or VS Code) is installed on Windows.
+    *   Install the "Remote - Containers" extension (ms-vscode-remote.remote-containers) in your IDE.
+
+## Common Next Steps
+
+### Inspecting the Database
+
+After the application has run, you can inspect the PostgreSQL database directly to verify the data:
 
 1.  **Find your Postgres container name:**
     Open a new terminal and list your running Docker containers:
     ```bash
     docker ps
     ```
-    Look for the container running the `postgres:13-alpine` image. The name is usually in the last column (e.g., `postgres_db_container` or something similar if you used the `container_name` attribute in `docker-compose.yml`, or a Docker-generated name).
+    Look for the container running the `postgres:13-alpine` image. The name is usually in the last column.
 
 2.  **Connect to the Postgres container using `psql`:**
     Use the container name or ID from the previous step. The default username (`myuser`) and database name (`mydatabase`) are specified in `docker-compose.yml`.
     ```bash
     docker exec -it <your_postgres_container_name_or_id> psql -U myuser -d mydatabase
     ```
-    For example, if your container name is `postgres_db_container`:
+    For example, if your container name is `stock_data_processor-postgres-db-1` (name might vary):
     ```bash
-    docker exec -it postgres_db_container psql -U myuser -d mydatabase
+    docker exec -it stock_data_processor-postgres-db-1 psql -U myuser -d mydatabase
     ```
 
 3.  **Inspect the data using `psql` commands:**
     Once connected, you can use standard SQL queries and `psql` commands:
-
-    *   List all tables:
-        ```sql
-        \dt
-        ```
-    *   Describe the `stocks` table schema:
-        ```sql
-        \d stocks
-        ```
-    *   Describe the `stock_prices` table schema:
-        ```sql
-        \d stock_prices
-        ```
-    *   View all stock symbols:
-        ```sql
-        SELECT * FROM stocks;
-        ```
-    *   View all price entries (joining with stocks table for symbol):
+    *   List all tables: `\dt`
+    *   Describe the `stocks` table schema: `\d stocks`
+    *   Describe the `stock_prices` table schema: `\d stock_prices`
+    *   View all stock symbols: `SELECT * FROM stocks;`
+    *   View all price entries:
         ```sql
         SELECT s.symbol, sp.date, sp.price, sp.ma_5day, sp.ma_30day
         FROM stock_prices sp
         JOIN stocks s ON sp.stock_id = s.id
         ORDER BY s.symbol, sp.date DESC;
         ```
-    *   View recent price data for a specific stock (e.g., AAPL):
-        ```sql
-        SELECT s.symbol, sp.date, sp.price, sp.ma_5day, sp.ma_30day
-        FROM stock_prices sp
-        JOIN stocks s ON sp.stock_id = s.id
-        WHERE s.symbol = 'AAPL'
-        ORDER BY sp.date DESC
-        LIMIT 10;
-        ```
-    *   To exit `psql`, type:
-        ```sql
-        \q
-        ```
+    *   To exit `psql`, type: `\q`
+
+### Stopping the Services
+
+To stop the services, press `Ctrl+C` in the terminal where `docker-compose` is running. Alternatively, from another terminal in the project directory, run:
+```bash
+docker-compose down
+```
+To stop the services and remove the data volumes (including Postgres data), use:
+```bash
+docker-compose down -v
+```
 
 ## Environment Variables
 
-The application uses the following environment variables, configured in `docker-compose.yml` for the `python-app` service and potentially mirrored in `launch.json` for debugging:
+The application uses the following environment variables, configured in `docker-compose.yml` for the `python-app` service:
 
 *   `POSTGRES_USER`: Username for the PostgreSQL database.
 *   `POSTGRES_PASSWORD`: Password for the PostgreSQL database.
