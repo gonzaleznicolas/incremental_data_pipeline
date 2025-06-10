@@ -1,0 +1,37 @@
+services:
+  python-app:
+    build: .
+    container_name: python_app_container
+    environment:
+      - POSTGRES_USER=myuser
+      - POSTGRES_PASSWORD=mypassword
+      - POSTGRES_DB=mydatabase
+      - POSTGRES_HOST=postgres-db # This should match the service name of the postgres container
+      - STOCK_SYMBOLS=AAPL,MSFT,GOOGL
+    depends_on:
+      - postgres-db
+    volumes:
+      - .:/app # Mount current directory to /app in container for live code changes (optional, good for dev)
+    networks:
+      - app-network
+
+  postgres-db:
+    image: postgres:13-alpine # Using a specific version like 13-alpine is good practice
+    container_name: postgres_db_container
+    environment:
+      - POSTGRES_USER=myuser
+      - POSTGRES_PASSWORD=mypassword
+      - POSTGRES_DB=mydatabase
+    volumes:
+      - postgres_data:/var/lib/postgresql/data # Persist database data
+    ports:
+      - "5432:5432" # Expose postgres port to host (optional, for external tools)
+    networks:
+      - app-network
+
+volumes:
+  postgres_data: # Defines the named volume for data persistence
+
+networks:
+  app-network: # Defines the network for services to communicate
+    driver: bridge
