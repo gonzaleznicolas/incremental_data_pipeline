@@ -7,6 +7,7 @@ This application fetches historical stock data for a configurable list of symbol
 *   Python
 *   `yfinance` for stock data
 *   `pandas` for data manipulation (moving averages)
+*   `SQLAlchemy` for interacting with the database
 *   PostgreSQL for data storage
 *   Docker & Docker Compose
 
@@ -42,9 +43,11 @@ services:
     environment:
       # ... other env vars ...
       - STOCK_SYMBOLS=AAPL,MSFT,GOOGL # <-- Modify here
+      - FETCH_START_DATE=2023-02-01    # Optional: Start date (YYYY-MM-DD format)
+      - FETCH_END_DATE=2023-02-15      # Optional: End date (YYYY-MM-DD format)
     # ...
 ```
-Update the `STOCK_SYMBOLS` line with your desired comma-separated stock symbols.
+Update the `STOCK_SYMBOLS` line with your desired comma-separated stock symbols. Optionally, you can also specify `FETCH_START_DATE` and `FETCH_END_DATE` to fetch data for a specific date range instead of the default 3-month period.
 
 ## Running the Application
 
@@ -138,6 +141,10 @@ The application uses the following environment variables, configured in `docker-
 *   `POSTGRES_DB`: Name of the PostgreSQL database.
 *   `POSTGRES_HOST`: Hostname of the PostgreSQL service (e.g., `postgres-db`).
 *   `STOCK_SYMBOLS`: Comma-separated list of stock symbols to process (e.g., `AAPL,MSFT,GOOGL`).
+*   `FETCH_START_DATE` (Optional): Start date for fetching historical data in YYYY-MM-DD format (e.g., `2023-02-01`). If not provided, defaults to fetching the last 3 months of data.
+*   `FETCH_END_DATE` (Optional): End date for fetching historical data in YYYY-MM-DD format (e.g., `2023-02-15`). Must be used together with `FETCH_START_DATE`. If not provided, defaults to fetching the last 3 months of data.
+
+**Note**: Both `FETCH_START_DATE` and `FETCH_END_DATE` must be provided together if you want to specify a custom date range. If only one is provided, the application will default to fetching the last 3 months of data. The start date must be before the end date.
 
 ## Database Schema
 
