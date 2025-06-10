@@ -8,6 +8,8 @@ services:
       - POSTGRES_DB=mydatabase
       - POSTGRES_HOST=postgres-db # This should match the service name of the postgres container
       - STOCK_SYMBOLS=AAPL,MSFT,GOOGL
+      # - FETCH_START_DATE=2023-02-01
+      # - FETCH_END_DATE=2023-02-15
     depends_on:
       - postgres-db
     volumes:

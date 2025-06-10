@@ -34,6 +34,9 @@ def get_env_variable(name):
         if name == 'STOCK_SYMBOLS':
             print(f"Warning: Environment variable {name} not set. Using default 'AAPL,MSFT'.")
             return "AAPL,MSFT" # Default value if not set
+        if name in ['FETCH_START_DATE', 'FETCH_END_DATE']:
+            print(f"Warning: Optional environment variable {name} not set. Defaulting to None.")
+            return None
         raise Exception(f"Environment variable {name} not set.")
 
 def get_or_create_stock_id(symbol: str, db: Session):
@@ -58,89 +61,109 @@ def get_or_create_stock_id(symbol: str, db: Session):
         print(f"Error in get_or_create_stock_id for {symbol} (SQLAlchemy): {e}")
         raise
 
-def process_stock_symbol(symbol: str, db: Session):
+def process_stock_symbol(symbol: str, db: Session, start_date_str: str = None, end_date_str: str = None):
     """
     Fetches historical stock data for a given symbol using yfinance,
     calculates moving averages, and upserts the latest data point into the stock_prices table using SQLAlchemy.
+    Optionally uses start_date_str and end_date_str to define a fetch period.
     """
     print(f"Processing data for stock symbol: {symbol}")
     try:
         stock_id = get_or_create_stock_id(symbol, db)
         if stock_id is None:
-            # This condition might be redundant if get_or_create_stock_id always raises on failure to get/create.
             print(f"Could not get or create stock ID for {symbol}. Skipping processing.")
             return
 
         ticker = yf.Ticker(symbol)
-        hist_data = ticker.history(period="3mo")
+        hist_data = None
+        use_default_period = True
 
-        if hist_data.empty:
-            print(f"Warning: No historical data found for {symbol}. Skipping.")
+        if start_date_str and end_date_str:
+            try:
+                parsed_start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+                parsed_end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+                if parsed_start_date >= parsed_end_date:
+                    print(f"Error: Start date {start_date_str} must be before end date {end_date_str} for symbol {symbol}. Defaulting to 3mo period.")
+                else:
+                    print(f"Fetching data for {symbol} from {parsed_start_date} to {parsed_end_date}.")
+                    hist_data = ticker.history(start=parsed_start_date, end=parsed_end_date)
+                    use_default_period = False
+            except ValueError as e:
+                print(f"Error parsing dates for symbol {symbol} (start: {start_date_str}, end: {end_date_str}): {e}. Defaulting to 3mo period.")
+        elif start_date_str or end_date_str:
+            # This means one is provided but not the other
+            print(f"Error: Both FETCH_START_DATE and FETCH_END_DATE must be provided if one is set for symbol {symbol}. Defaulting to 3mo period.")
+
+        if use_default_period:
+            if not (start_date_str or end_date_str): # Only log if no dates were attempted
+                print(f"No start/end dates provided or dates were invalid for {symbol}. Defaulting to 3mo period.")
+            hist_data = ticker.history(period="3mo")
+
+        if hist_data is None or hist_data.empty: # hist_data could be None if yfinance fails with specific dates
+            print(f"Warning: No historical data found for {symbol} for the specified period or default. Skipping.")
             return
 
         hist_data['MA5'] = hist_data['Close'].rolling(window=5).mean()
         hist_data['MA30'] = hist_data['Close'].rolling(window=30).mean()
 
-        if hist_data.empty: # Should be caught by earlier check
-            print(f"Warning: Historical data became empty after processing for {symbol}. Skipping.")
-            return
+        # hist_data.empty check is already done before this block
 
-        latest_data = None
-        # Iterate backwards from the last row to find a row with price data
-        for i in range(len(hist_data) - 1, -1, -1):
-            if pd.notna(hist_data.iloc[i]['Close']):
-                latest_data = hist_data.iloc[i]
-                break
+        processed_count = 0
+        for data_date_ts, row_data in hist_data.iterrows():
+            try:
+                # Convert pandas.Timestamp (data_date_ts from index) to Python datetime.date
+                if pd.isnull(data_date_ts):
+                    print(f"Warning: Timestamp for date is null for a row in {symbol}. Skipping this row.")
+                    continue
+                data_date = data_date_ts.to_pydatetime().date()
 
-        if latest_data is None or latest_data.name is None:
-            print(f"Warning: Could not find a valid latest data point for {symbol}. Skipping.")
-            return
+                price = float(row_data['Close']) if pd.notna(row_data['Close']) else None
+                ma5 = float(row_data['MA5']) if pd.notna(row_data['MA5']) else None
+                ma30 = float(row_data['MA30']) if pd.notna(row_data['MA30']) else None
 
-        # Convert pandas.Timestamp (latest_data.name) to Python datetime.date
-        # latest_data.name is the index, which is a Timestamp
-        data_date_ts = latest_data.name
-        if pd.isnull(data_date_ts):
-            print(f"Warning: Timestamp for date is null for {symbol}. Skipping.")
-            return
-        data_date = data_date_ts.to_pydatetime().date()
+                if price is None:
+                    print(f"Warning: Price is null for {symbol} on {data_date}. Skipping this record.")
+                    continue
 
+                existing_price_entry = db.query(StockPrice).filter_by(stock_id=stock_id, date=data_date).first()
 
-        price = float(latest_data['Close']) if pd.notna(latest_data['Close']) else None
-        ma5 = float(latest_data['MA5']) if pd.notna(latest_data['MA5']) else None
-        ma30 = float(latest_data['MA30']) if pd.notna(latest_data['MA30']) else None
+                if existing_price_entry:
+                    print(f"Updating data for {symbol} on {data_date}...")
+                    existing_price_entry.price = price
+                    existing_price_entry.ma_5day = ma5
+                    existing_price_entry.ma_30day = ma30
+                else:
+                    print(f"Inserting new data for {symbol} on {data_date}...")
+                    new_price_entry = StockPrice(
+                        stock_id=stock_id,
+                        date=data_date,
+                        price=price,
+                        ma_5day=ma5,
+                        ma_30day=ma30
+                    )
+                    db.add(new_price_entry)
 
-        if price is None:
-            print(f"Warning: Latest price is null for {symbol} on {data_date}. Skipping.")
-            return
+                db.commit() # Commit after each upsert as per instruction
+                processed_count += 1
+                # Optional: More detailed print for each upsert can be verbose, so a summary print is better.
+                # price_str = f"{price:.2f}" if isinstance(price, float) else "N/A"
+                # ma5_str = f"{ma5:.2f}" if isinstance(ma5, float) else "N/A"
+                # ma30_str = f"{ma30:.2f}" if isinstance(ma30, float) else "N/A"
+                # print(f"Successfully upserted data for {symbol} on {data_date}: Price={price_str}, MA5={ma5_str}, MA30={ma30_str}")
 
-        existing_price_entry = db.query(StockPrice).filter_by(stock_id=stock_id, date=data_date).first()
+            except Exception as e_row: # Catch error for specific row processing
+                db.rollback()
+                print(f"Error processing row for {symbol} on date {data_date_ts}: {e_row}. Skipping this row.")
+                continue # Continue to the next row
 
-        if existing_price_entry:
-            print(f"Updating data for {symbol} on {data_date}...")
-            existing_price_entry.price = price
-            existing_price_entry.ma_5day = ma5
-            existing_price_entry.ma_30day = ma30
+        if processed_count > 0:
+            print(f"Successfully processed and upserted {processed_count} data points for {symbol}.")
         else:
-            print(f"Inserting new data for {symbol} on {data_date}...")
-            new_price_entry = StockPrice(
-                stock_id=stock_id,
-                date=data_date,
-                price=price,
-                ma_5day=ma5,
-                ma_30day=ma30
-            )
-            db.add(new_price_entry)
-
-        db.commit()
-
-        price_str = f"{price:.2f}" if isinstance(price, float) else "N/A"
-        ma5_str = f"{ma5:.2f}" if isinstance(ma5, float) else "N/A"
-        ma30_str = f"{ma30:.2f}" if isinstance(ma30, float) else "N/A"
-        print(f"Successfully upserted data for {symbol} on {data_date}: Price={price_str}, MA5={ma5_str}, MA30={ma30_str}")
+            print(f"No data points were processed/upserted for {symbol} from the fetched history.")
 
     except Exception as e:
-        db.rollback()
-        print(f"Error processing stock symbol {symbol} (SQLAlchemy): {e}")
+        db.rollback() # Ensure rollback for errors not caught by the per-row handler
+        print(f"Error processing stock symbol {symbol} (SQLAlchemy): {e}. Any uncommitted changes for this symbol rolled back. Data from previous symbols (if any) remains committed.")
         # raise # Optionally re-raise if main loop should stop
 
 def main():
@@ -204,8 +227,11 @@ def main():
 
         print(f"Processing symbols: {stock_symbols_list}")
 
+        fetch_start_date_str = get_env_variable('FETCH_START_DATE')
+        fetch_end_date_str = get_env_variable('FETCH_END_DATE')
+
         for symbol_item in stock_symbols_list:
-            process_stock_symbol(symbol_item, db) # Updated call
+            process_stock_symbol(symbol_item, db, fetch_start_date_str, fetch_end_date_str) # Updated call
 
         print("Finished processing all stock symbols.")
         # if conn_old: # Removed
