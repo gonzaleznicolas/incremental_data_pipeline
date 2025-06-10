@@ -1,3 +1,40 @@
+## Running the Application with Jules (or in a Linux VM)
+
+If you are running this project in a Linux-based environment (like Jules, the AI assistant, or any standard Linux VM), the setup is straightforward using Docker and Docker Compose. The WSL-specific instructions can be ignored.
+
+### Prerequisites for Linux VM
+
+*   **Docker Engine**: Ensure Docker is installed and the Docker daemon is running. You might need to add your user to the 'docker' group to run Docker commands without `sudo` (e.g., `sudo usermod -aG docker $USER` and then log out/in).
+*   **Docker Compose**: Ensure Docker Compose (v2.x or later is recommended) is installed. Installation instructions can be found on the official Docker documentation.
+
+### Configuration
+
+1.  **Clone the Repository**: If you haven't already, clone the project.
+    ```bash
+    # git clone <repository-url>
+    # cd <repository-name>
+    ```
+
+2.  **Configure Stock Symbols**: The application processes stock symbols defined in the `STOCK_SYMBOLS` environment variable within the `docker-compose.yml` file. You can modify this list as needed. Refer to the "Configure Stock Symbols" section under the WSL instructions for details on which line to edit in `docker-compose.yml`.
+
+### Running the Application
+
+1.  **Navigate to Project Root**: Open your terminal and go to the root directory of the project.
+
+2.  **Build and Run with Docker Compose**:
+    Use the following command to build the Docker images (if they haven't been built or if `Dockerfile`/`requirements.txt` has changed) and start the services:
+    ```bash
+    docker-compose up --build
+    ```
+    If you encounter permission issues, you might need to use `sudo` with your Docker commands (e.g., `sudo docker-compose up --build`). However, configuring user permissions for Docker is the recommended long-term solution.
+
+    This command will start the Python application and the PostgreSQL database. The application will fetch data for the configured symbols, calculate moving averages, and store them.
+
+### Inspecting the Database
+
+After the application has run, you can inspect the PostgreSQL database directly to verify the data. The instructions for this are identical to those provided in the main "Inspecting the Database" section above. You will use `docker ps` to find your Postgres container and `docker exec` to connect with `psql`.
+
+---
 # Python Stock Data Processor with Docker and PostgreSQL
 
 This application fetches historical stock data for a configurable list of symbols using the `yfinance` library, calculates 5-day and 30-day moving averages, and stores these details in a PostgreSQL database. The entire setup runs in Docker containers managed by Docker Compose.
